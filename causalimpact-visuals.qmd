@@ -1,0 +1,215 @@
+---
+title: "Visualizing CausalImpact Output with ggplot"
+author: "Tim Wilson"
+format: html
+editor: visual
+---
+
+## Purpose
+
+The CausalImpact R package generates a ready-made plot of its results. But, sometimes, it is useful to only display a subset of the results, as well as to adjust the specifics of the visualization. There are *some* limited adjustments that can be made without the approach outlined in this document, but those are often too limiting to meet the needs of a specific visualization.
+
+The approach here is pretty simple:
+
+1. Extract the results of the model and drop them into a data frame
+2. Use that data frame and **ggplot** to do various visualizations.
+
+## Getting Started
+
+Load the relevant packages.
+
+```{r}
+#| message: false
+#| warning: false
+
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse,
+               lubridate,    # Tweaking dates
+               scales,       # Handy for axis label formatting
+               CausalImpact  # Bayesian structural time-series forecasting
+)
+
+```
+
+This next part is artificial, in that we're just going to load a simple dataset to use with CausalImpact. This includes a (dramatic) detectable effect at the intervention point. The sample data includes a column with a date in it. This isn't required for CausalImpact (which can also work with data that is not daily data), but it's awfully common for that to be useful, so it's included in the sample here.
+
+The sample data has an intervention that occurred after day 60.
+
+This dataset also does *not* include any columns with covariates...because this is not about *using* CausalImpact but, rather, just about visualizing the results, and the covariates are just an optional additional input rather than part of the output.
+
+```{r}
+#| message: false
+#| warning: false
+
+df_input <- read_csv("sample_data.csv")
+head(df_input)
+
+```
+
+Run CausalImpact on the dataset and produce the default plot.
+
+```{r}
+#| message: false
+#| warning: false
+
+impact <- CausalImpact(df_input, 
+                       pre.period = as.Date(c("2023-01-19", "2023-03-20")),
+                       post.period = as.Date(c("2023-03-21", "2023-04-18")))
+
+plot(impact)
+
+```
+The default plot includes three plots. A subset of these can be displayed instead pretty easily:
+
+```{r}
+
+# Show just one of the plots
+plot(impact, "original")
+
+# Show two of the plots
+plot(impact, c("pointwise", "cumulative"))
+
+```
+And, we can even add ggplot-y elements, which can do quite a bit.
+
+```{r}
+
+# Work with a single chart
+plot(impact, "original") +
+  # Control the y-axis more to force a 0-based axis and to add commas to the #s
+  scale_y_continuous(expand = c(0,0), limits = ~ c(0, max(.x) * 1.05), label = dollar) +
+  # Change the x-axis to...why not...show weekly dates
+  scale_x_date(date_breaks = "1 week", date_labels = "%m/%d") +
+  # Add a title and a y-axis label
+  labs(title = "Estimated Impact of the Intervention",
+       y = "Revenue") +
+  # Additional formatting with various theme-age
+  theme_minimal() +
+  theme(plot.title.position = "plot",
+        axis.line.x = element_line(color = "gray30"),
+        panel.grid.minor.x = element_blank())
+
+```
+That's quite a bit. But, what if I wanted to change the lines or shaded areas on the chart itself? That, as far as I know, is a lot tougher, as those are actually defined within the plot--not things that can be simply changed "additively."
+
+If we want to change the characteristics of the plotted data elements themselves, this, in theory, is doable by working with `.params` arguments. Details on that are here: https://cran.r-project.org/web/packages/casebase/vignettes/customizingpopTime.html.
+
+10 minutes of noodling didn't get this working for me, although I'm confident that it is actually a workable approach. The challenge with this, though, is it starts to feel a little hacky--employing semi-obscure functionality to do plot retrofitting.
+
+So, let's quickly explore an alternative: simply plotting from the model's data itself.
+
+## Getting More Robustly Customized Visualizations
+
+Start by extracting all of the values used in the plot into a single data frame. The data is in a `zoo` object called `series` inside **impact**, so we're just going to turn that into a data frame, and we'll pull the date values, which are populated as row names, out into their own date column.
+
+```{r}
+
+df_output <- as.data.frame(impact$series) |>
+  # Go ahead and pull the rownames out as a separate date column
+  rownames_to_column(var = "date") |> 
+  mutate(date = as.Date(date))
+
+names(df_output)
+
+```
+
+These names may seem a little confusing at first, but this is actually a data frame with everything (except the location of the intervention) used in the default output plot.
+
+## Define Some "Base" Formatting
+
+This is not strictly necessary, but, often, we're going to build a few different visualizations that have similar stylistic characteristics, so let's define a base theme and any other "commonly used" aspects of the visuals. That way, we can tinker with those in one spot and have them propagate through all of the visuals (overriding them as necessary).
+
+```{r}
+
+# Set up the theme to use as the base for all plots
+theme_custom <- theme_minimal() +
+  theme(plot.title.position = "plot",
+        axis.title.x = element_blank(),
+        axis.line.x = element_line(color = "gray20"),
+        panel.grid.major.x = element_blank())
+
+# Define the ribbon color for all plots
+ribbon_color = "#e2dcf1"
+
+# Set a color and width for the "main line" being displayed
+main_line_width = 0.8
+main_line_color = "gray20"
+
+# Set a color, width, and linetype for the "prediction line" being displayed
+pred_line_width = 0.6
+pred_line_color = "#00008b"
+pred_line_type = "longdash"
+
+# Intervention line
+int_line_width = 0.8
+int_line_color = "gray70"
+int_line_type = "dotted"
+
+```
+
+### Original Plot
+
+Show a custom plot of just the "original" plot. 
+
+```{r}
+
+gg_original <- ggplot(df_output, aes(x = date)) +
+  # Add the ribbon
+  geom_ribbon(mapping = aes(ymin = point.pred.lower,
+                            ymax = point.pred.upper),
+              alpha = 0.9,
+              fill = ribbon_color) +
+  # Intervention line. This is the one thing we go back to the model and pull from--
+  # assuming we want to put it on the first day of the "post" period
+  geom_vline(mapping = aes(xintercept = impact$model$post.period[1]),
+             color = int_line_color, linetype = int_line_type, linewidth = int_line_width) +
+  # Add the "prediction" line
+  geom_line(mapping = aes(y = point.pred, group=1), color = pred_line_color, 
+            linetype = pred_line_type,
+            linewidth = pred_line_width) +
+  # Add the line with the actual data
+  geom_line(mapping = aes(y = response, group=1), linewidth = main_line_width) +
+  labs(title = "Estimated Impact of the Intervention",
+       y = "Revenue") +
+  scale_y_continuous(expand = c(0,0), limits = ~ c(0, max(.x) * 1.05), 
+                     labels = dollar) +
+  scale_x_date(date_breaks = "1 week", date_labels = "%m/%d") +
+  theme_custom
+
+gg_original
+
+```
+
+### Pointwise Plot
+
+Do the same thing...but for the pointwise plot.
+
+```{r}
+
+gg_pointwise <- ggplot(df_output, aes(x = date)) + 
+  # Add the ribbon
+  geom_ribbon(mapping = aes(ymin = point.effect.lower,
+                            ymax = point.effect.upper),
+              alpha = 0.9,
+              fill = ribbon_color) +
+  # Intervention line.
+  geom_vline(mapping = aes(xintercept = impact$model$post.period[1]),
+             color = int_line_color, linetype = int_line_type, linewidth = int_line_width) +
+  # The prediction line (pointwise)
+  geom_line(mapping = aes(y = point.effect, group=1), 
+            color = pred_line_color, linetype = pred_line_type) + 
+  # The "actual" for this plot is the baseline
+  geom_hline(mapping = aes(yintercept=0), color = main_line_color,
+             linewidth = main_line_width) + 
+  labs(title = "Pointwise Results", y = "Incremental Revenue") + 
+  scale_y_continuous(expand = c(0,0), 
+                     labels = dollar) + 
+  scale_x_date(date_breaks = "1 week", date_labels = "%m/%d") + 
+  theme_custom
+
+gg_pointwise
+
+```
+At this point, the sky is really the limit, right? The visual can be endlessly tweaked for the specifics of the situation!
+
+The repo for this post is at: [github.com/gilliganondata/causalimpact-visuals](https://github.com/gilliganondata/causalimpact-visuals).
