@@ -92,7 +92,7 @@ plot(impact, "original") +
 ```
 That's quite a bit. But, what if I wanted to change the lines or shaded areas on the chart itself? That, as far as I know, is a lot tougher, as those are actually defined within the plot--not things that can be simply changed "additively."
 
-If we want to change the characteristics of the plotted data elements themselves, this, in theory, is doable by working with `.params` arguments. Details on that are here: https://cran.r-project.org/web/packages/casebase/vignettes/customizingpopTime.html.
+If we want to change the characteristics of the plotted data elements themselves, this, in theory, is doable by working with `.params` arguments. Details on that are [here](https://cran.r-project.org/web/packages/casebase/vignettes/customizingpopTime.html).
 
 10 minutes of noodling didn't get this working for me, although I'm confident that it is actually a workable approach. The challenge with this, though, is it starts to feel a little hacky--employing semi-obscure functionality to do plot retrofitting.
 
